@@ -24,10 +24,12 @@ export interface UploadsTable {
   key: string
   version: string
   id: string
+  driver_upload_id: string | null
 }
 export interface UploadPartsTable {
   upload_id: string
   part_number: number
+  e_tag: string | null
 }
 
 export interface MetaTable {

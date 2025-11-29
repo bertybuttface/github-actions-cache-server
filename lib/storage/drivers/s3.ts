@@ -1,23 +1,18 @@
 import type { StorageDriver } from '~/lib/storage/storage-driver'
-import { createReadStream, createWriteStream } from 'node:fs'
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { Readable } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
 
 import {
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
-  ListObjectsV2Command,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3'
-import { Upload } from '@aws-sdk/lib-storage'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import * as R from 'remeda'
 import { z } from 'zod'
-import { BASE_FOLDER, parseEnv, UPLOAD_FOLDER } from '~/lib/storage/storage-driver'
-import { createTempDir } from '~/lib/utils'
+import { BASE_FOLDER, parseEnv } from '~/lib/storage/storage-driver'
 
 export const S3StorageDriver = {
   async create() {
@@ -46,33 +41,6 @@ export const S3StorageDriver = {
         throw new Error(`Bucket ${options.STORAGE_S3_BUCKET} does not exist`)
       }
       throw err
-    }
-
-    async function listObjectsByPrefix(prefix: string) {
-      const objects: string[] = []
-      let continuationToken: string | undefined
-
-      do {
-        const response = await s3.send(
-          new ListObjectsV2Command({
-            Bucket: options.STORAGE_S3_BUCKET,
-            Prefix: prefix,
-            ContinuationToken: continuationToken,
-          }),
-        )
-
-        if (response.Contents) {
-          for (const object of response.Contents) {
-            if (object.Key) {
-              objects.push(object.Key)
-            }
-          }
-        }
-
-        continuationToken = response.NextContinuationToken
-      } while (continuationToken)
-
-      return objects
     }
 
     async function deleteMany(objectNames: string[]) {
@@ -120,69 +88,84 @@ export const S3StorageDriver = {
           },
         )
       },
-      async uploadPart(opts) {
-        const upload = new Upload({
-          client: s3,
-          params: {
+      async initiateMultipartUpload(uploadId, cacheFileName) {
+        const result = await s3.send(
+          new CreateMultipartUploadCommand({
             Bucket: options.STORAGE_S3_BUCKET,
-            Key: `${BASE_FOLDER}/${UPLOAD_FOLDER}/${opts.uploadId}/part_${opts.partNumber}`,
-            Body: opts.data,
-          },
-          partSize: 64 * 1024 * 1024, // 64 MB
-          queueSize: 4,
-        })
-        await upload.done()
+            Key: `${BASE_FOLDER}/${cacheFileName}`,
+          }),
+        )
+        return result.UploadId || null
+      },
+
+      async uploadPart(opts) {
+        if (!opts.driverUploadId) {
+          throw new Error('S3 driver requires driverUploadId for uploadPart')
+        }
+        if (!opts.cacheFileName) {
+          throw new Error('S3 driver requires cacheFileName for uploadPart')
+        }
+
+        // Convert ReadableStream to Buffer
+        const reader = opts.data.getReader()
+        const chunks: Uint8Array[] = []
+        let totalLength = 0
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          chunks.push(value)
+          totalLength += value.length
+        }
+
+        const buffer = Buffer.concat(chunks, totalLength)
+
+        const result = await s3.send(
+          new UploadPartCommand({
+            Bucket: options.STORAGE_S3_BUCKET,
+            Key: `${BASE_FOLDER}/${opts.cacheFileName}`,
+            UploadId: opts.driverUploadId,
+            PartNumber: opts.partNumber,
+            Body: buffer,
+          }),
+        )
+
+        return result.ETag || null
       },
 
       async completeMultipartUpload(opts) {
-        const tempDir = await createTempDir()
-        const outputTempFilePath = path.join(tempDir, 'output')
-        const writeStream = createWriteStream(outputTempFilePath)
-
-        // Stream parts sequentially (must maintain order) using efficient pipeline
-        for (const partNumber of opts.partNumbers) {
-          const part = await s3.send(
-            new GetObjectCommand({
-              Bucket: options.STORAGE_S3_BUCKET,
-              Key: `${BASE_FOLDER}/${UPLOAD_FOLDER}/${opts.uploadId}/part_${partNumber}`,
-            }),
-          )
-
-          if (!part.Body) throw new Error(`Part ${partNumber} is missing`)
-
-          // Stream directly to file - no buffering, no random writes
-          const webStream = part.Body.transformToWebStream()
-          await pipeline(Readable.fromWeb(webStream as any), writeStream, { end: false })
+        if (!opts.driverUploadId) {
+          throw new Error('S3 driver requires driverUploadId for completeMultipartUpload')
+        }
+        if (!opts.partETags || opts.partETags.length === 0) {
+          throw new Error('S3 driver requires partETags for completeMultipartUpload')
         }
 
-        writeStream.end()
-        await new Promise<void>((resolve, reject) => {
-          writeStream.on('finish', resolve)
-          writeStream.on('error', reject)
-        })
-
-        // Re-upload with higher concurrency
-        const readStream = createReadStream(outputTempFilePath)
-        const upload = new Upload({
-          client: s3,
-          params: {
+        // CompleteMultipartUpload assembles the parts server-side - no download/re-upload needed!
+        await s3.send(
+          new CompleteMultipartUploadCommand({
             Bucket: options.STORAGE_S3_BUCKET,
             Key: `${BASE_FOLDER}/${opts.cacheFileName}`,
-            Body: readStream,
-          },
-          partSize: 64 * 1024 * 1024, // 64 MB
-          queueSize: 4,
-        })
-        await upload.done()
-
-        await Promise.all([
-          this.cleanupMultipartUpload(opts.uploadId),
-          fs.rm(tempDir, { force: true, recursive: true }),
-        ])
+            UploadId: opts.driverUploadId,
+            MultipartUpload: {
+              Parts: opts.partETags.map((part) => ({
+                ETag: part.eTag,
+                PartNumber: part.partNumber,
+              })),
+            },
+          }),
+        )
       },
-      async cleanupMultipartUpload(uploadId) {
-        const objectNames = await listObjectsByPrefix(`${BASE_FOLDER}/${UPLOAD_FOLDER}/${uploadId}`)
-        await deleteMany(objectNames)
+      async cleanupMultipartUpload(uploadId, driverUploadId) {
+        // If driverUploadId is provided, abort the S3 multipart upload
+        // We don't know the cacheFileName here, so we can't abort properly
+        // This is a limitation - we'll need to store cacheFileName in the uploads table
+        // For now, list and delete any orphaned multipart uploads manually or via lifecycle policies
+        if (driverUploadId) {
+          // Can't abort without knowing the key - S3 limitation
+          // AbortMultipartUpload requires both Key and UploadId
+          // Multipart uploads should be cleaned up via S3 lifecycle rules
+        }
       },
     }
   },

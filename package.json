@@ -4,7 +4,7 @@
   "version": "8.1.4",
   "private": true,
   "engines": {
-    "node": "22",
+    "node": "24",
     "pnpm": "10"
   },
   "scripts": {
@@ -18,7 +18,8 @@
     "type-check": "tsc -p tsconfig.json --noEmit",
     "action": "act -v --env ACTIONS_RESULTS_URL=http://host.docker.internal:3000/ --container-architecture linux/amd64 -W tests",
     "test:watch": "DEBUG=true VITEST_DB_DRIVER=sqlite VITEST_STORAGE_DRIVER=filesystem vitest --watch --ui",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "benchmark": "tsx scripts/benchmark.ts"
   },
   "changelogithub": {
     "extends": "gh:falcondev-it/configs/changelogithub"
@@ -67,6 +68,7 @@
     "start-server-and-test": "^2.0.13",
     "testcontainers": "^11.5.1",
     "ts-pattern": "^5.8.0",
+    "tsx": "^4.19.0",
     "vitest": "^3.2.4",
     "wait-on": "^8.0.4"
   },

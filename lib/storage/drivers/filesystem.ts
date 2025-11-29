@@ -31,6 +31,7 @@ export const FilesystemStorageDriver = {
           path.join(folderPath, `part_${opts.partNumber}`),
         )
         await pipeline(opts.data, writeStream)
+        return null
       },
 
       async completeMultipartUpload(opts) {

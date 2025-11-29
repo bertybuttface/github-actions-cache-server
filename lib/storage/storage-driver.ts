@@ -11,17 +11,25 @@ export interface StorageDriver {
   delete: (cacheFileNames: CacheFileName[]) => Promise<void>
   createReadStream: (cacheFileName: CacheFileName) => Promise<ReadableStream | Readable | null>
   createDownloadUrl?: (cacheFileName: CacheFileName) => Promise<string>
+  initiateMultipartUpload?: (
+    uploadId: string,
+    cacheFileName: CacheFileName,
+  ) => Promise<string | null>
   uploadPart: (opts: {
     uploadId: string
     partNumber: number
     data: ReadableStream
-  }) => Promise<void>
+    driverUploadId?: string | null
+    cacheFileName?: CacheFileName
+  }) => Promise<string | null>
   completeMultipartUpload: (opts: {
     cacheFileName: CacheFileName
     uploadId: string
     partNumbers: number[]
+    driverUploadId?: string | null
+    partETags?: Array<{ partNumber: number; eTag: string }>
   }) => Promise<void>
-  cleanupMultipartUpload: (uploadId: string) => Promise<void>
+  cleanupMultipartUpload: (uploadId: string, driverUploadId?: string | null) => Promise<void>
 }
 
 export function parseEnv<Schema extends z.ZodTypeAny>(schema: Schema) {

@@ -76,5 +76,15 @@ export function migrations(dbType: DatabaseDriverName) {
         await db.schema.alterTable('upload_parts').dropColumn('e_tag').execute()
       },
     },
+    $4_add_s3_multipart_columns: {
+      async up(db) {
+        await db.schema.alterTable('uploads').addColumn('driver_upload_id', 'text').execute()
+        await db.schema.alterTable('upload_parts').addColumn('e_tag', 'text').execute()
+      },
+      async down(db) {
+        await db.schema.alterTable('uploads').dropColumn('driver_upload_id').execute()
+        await db.schema.alterTable('upload_parts').dropColumn('e_tag').execute()
+      },
+    },
   } satisfies Record<string, Migration>
 }

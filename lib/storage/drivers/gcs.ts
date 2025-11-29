@@ -53,6 +53,7 @@ export const GCSStorageDriver = {
         await bucket
           .file(`${BASE_FOLDER}/${UPLOAD_FOLDER}/${opts.uploadId}/part_${opts.partNumber}`)
           .save(opts.data)
+        return null
       },
 
       async completeMultipartUpload(opts) {

@@ -48,6 +48,13 @@ export const useStorageAdapter = createSingletonPromise(async () => {
         }
 
         const uploadId = randomInt(1_000_000_000, 9_999_999_999)
+        const cacheFileName = getCacheFileName(key, version)
+
+        // Initiate multipart upload if driver supports it
+        let driverUploadId: string | null = null
+        if (driver.initiateMultipartUpload) {
+          driverUploadId = await driver.initiateMultipartUpload(uploadId.toString(), cacheFileName)
+        }
 
         await db
           .insertInto('uploads')
@@ -56,6 +63,7 @@ export const useStorageAdapter = createSingletonPromise(async () => {
             id: uploadId.toString(),
             key,
             version,
+            driver_upload_id: driverUploadId,
           })
           .execute()
 
@@ -63,6 +71,7 @@ export const useStorageAdapter = createSingletonPromise(async () => {
           key,
           version,
           uploadId,
+          driverUploadId,
         })
 
         return {
@@ -93,18 +102,22 @@ export const useStorageAdapter = createSingletonPromise(async () => {
         }
 
         const partNumber = chunkIndex + 1
+        const cacheFileName = getCacheFileName(upload.key, upload.version)
 
         try {
-          await driver.uploadPart({
+          const eTag = await driver.uploadPart({
             uploadId: upload.id,
             partNumber,
             data: chunkStream,
+            driverUploadId: upload.driver_upload_id,
+            cacheFileName,
           })
           await db
             .insertInto('upload_parts')
             .values({
               part_number: partNumber,
               upload_id: uploadId.toString(),
+              e_tag: eTag,
             })
             .execute()
         } catch (err) {
@@ -154,6 +167,13 @@ export const useStorageAdapter = createSingletonPromise(async () => {
             cacheFileName: getCacheFileName(upload.key, upload.version),
             uploadId: upload.id,
             partNumbers: parts.map((part) => part.part_number),
+            driverUploadId: upload.driver_upload_id,
+            partETags: parts
+              .filter((part) => part.e_tag !== null)
+              .map((part) => ({
+                partNumber: part.part_number,
+                eTag: part.e_tag as string,
+              })),
           })
         })
       },
@@ -216,7 +236,7 @@ export const useStorageAdapter = createSingletonPromise(async () => {
 
         for (const upload of uploads) {
           try {
-            await driver.cleanupMultipartUpload(upload.id)
+            await driver.cleanupMultipartUpload(upload.id, upload.driver_upload_id)
             await db.deleteFrom('uploads').where('id', '=', upload.id).execute()
           } catch (err) {
             logger.error('Failed to cleanup upload', upload, err)
