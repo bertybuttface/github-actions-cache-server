@@ -75,9 +75,12 @@ export const FilesystemStorageDriver = {
 
       async createReadStream(cacheFileName) {
         const filePath = path.join(rootFolder, BASE_FOLDER, cacheFileName)
-        if (!(await fs.stat(filePath))) return null
-
-        return createReadStream(filePath)
+        try {
+          await fs.access(filePath)
+          return createReadStream(filePath)
+        } catch {
+          return null
+        }
       },
     }
   },
