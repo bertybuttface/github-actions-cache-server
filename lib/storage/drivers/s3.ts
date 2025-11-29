@@ -1,7 +1,9 @@
 import type { StorageDriver } from '~/lib/storage/storage-driver'
-import { createReadStream } from 'node:fs'
+import { createReadStream, createWriteStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 
 import {
   DeleteObjectsCommand,
@@ -135,11 +137,9 @@ export const S3StorageDriver = {
       async completeMultipartUpload(opts) {
         const tempDir = await createTempDir()
         const outputTempFilePath = path.join(tempDir, 'output')
+        const writeStream = createWriteStream(outputTempFilePath)
 
-        await fs.writeFile(outputTempFilePath, '')
-        const outputTempFile = await fs.open(outputTempFilePath, 'r+')
-
-        let currentChunk = 0
+        // Stream parts sequentially (must maintain order) using efficient pipeline
         for (const partNumber of opts.partNumbers) {
           const part = await s3.send(
             new GetObjectCommand({
@@ -150,19 +150,18 @@ export const S3StorageDriver = {
 
           if (!part.Body) throw new Error(`Part ${partNumber} is missing`)
 
-          const partStream = part.Body.transformToWebStream()
-          const bufferWriteStream = new WritableStream<Buffer>({
-            async write(chunk) {
-              const start = currentChunk
-              currentChunk += chunk.length
-              await outputTempFile.write(chunk, 0, chunk.length, start)
-            },
-          })
-          await partStream.pipeTo(bufferWriteStream)
+          // Stream directly to file - no buffering, no random writes
+          const webStream = part.Body.transformToWebStream()
+          await pipeline(Readable.fromWeb(webStream as any), writeStream, { end: false })
         }
 
-        await outputTempFile.close()
+        writeStream.end()
+        await new Promise<void>((resolve, reject) => {
+          writeStream.on('finish', resolve)
+          writeStream.on('error', reject)
+        })
 
+        // Re-upload with higher concurrency
         const readStream = createReadStream(outputTempFilePath)
         const upload = new Upload({
           client: s3,
@@ -178,7 +177,7 @@ export const S3StorageDriver = {
 
         await Promise.all([
           this.cleanupMultipartUpload(opts.uploadId),
-          fs.rm(outputTempFilePath, { force: true }),
+          fs.rm(tempDir, { force: true, recursive: true }),
         ])
       },
       async cleanupMultipartUpload(uploadId) {
