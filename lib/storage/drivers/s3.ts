@@ -127,7 +127,7 @@ export const S3StorageDriver = {
             Body: opts.data,
           },
           partSize: 64 * 1024 * 1024, // 64 MB
-          queueSize: 1,
+          queueSize: 4,
         })
         await upload.done()
       },
@@ -172,7 +172,7 @@ export const S3StorageDriver = {
             Body: readStream,
           },
           partSize: 64 * 1024 * 1024, // 64 MB
-          queueSize: 1,
+          queueSize: 4,
         })
         await upload.done()
 
