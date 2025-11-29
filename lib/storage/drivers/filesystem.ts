@@ -66,11 +66,11 @@ export const FilesystemStorageDriver = {
       },
 
       async delete(cacheFileNames): Promise<void> {
-        for (const cacheFileName of cacheFileNames) {
-          await fs.rm(path.join(rootFolder, BASE_FOLDER, cacheFileName), {
-            force: true,
-          })
-        }
+        await Promise.all(
+          cacheFileNames.map((cacheFileName) =>
+            fs.rm(path.join(rootFolder, BASE_FOLDER, cacheFileName), { force: true }),
+          ),
+        )
       },
 
       async createReadStream(cacheFileName) {
