@@ -33,7 +33,12 @@ async function reserveCache(key: string, version: string): Promise<number> {
   return data.cacheId
 }
 
-async function uploadChunk(cacheId: number, chunk: Buffer, start: number, end: number): Promise<void> {
+async function uploadChunk(
+  cacheId: number,
+  chunk: Buffer,
+  start: number,
+  end: number,
+): Promise<void> {
   const res = await fetch(`${BASE_URL}/_apis/artifactcache/caches/${cacheId}`, {
     method: 'PATCH',
     headers: {
@@ -59,7 +64,9 @@ async function commitCache(cacheId: number): Promise<void> {
 }
 
 async function getCacheEntry(key: string, version: string): Promise<string> {
-  const res = await fetch(`${BASE_URL}/_apis/artifactcache/cache?keys=${encodeURIComponent(key)}&version=${encodeURIComponent(version)}`)
+  const res = await fetch(
+    `${BASE_URL}/_apis/artifactcache/cache?keys=${encodeURIComponent(key)}&version=${encodeURIComponent(version)}`,
+  )
 
   if (res.status === 204) {
     throw new Error('Cache not found')
@@ -70,7 +77,20 @@ async function getCacheEntry(key: string, version: string): Promise<string> {
   }
 
   const data = (await res.json()) as { archiveLocation: string }
-  return data.archiveLocation
+  let downloadUrl = data.archiveLocation
+
+  // Rewrite localhost/127.0.0.1 in download URL to match API_BASE_URL host
+  // This allows remote benchmarking when S3 is on localhost (e.g., LocalStack)
+  if (downloadUrl.includes('localhost') || downloadUrl.includes('127.0.0.1')) {
+    const baseUrlObj = new URL(BASE_URL)
+    const downloadUrlObj = new URL(downloadUrl)
+
+    // Replace host but keep port (to preserve S3/LocalStack port)
+    downloadUrlObj.hostname = baseUrlObj.hostname
+    downloadUrl = downloadUrlObj.toString()
+  }
+
+  return downloadUrl
 }
 
 async function downloadCache(url: string): Promise<number> {
@@ -166,7 +186,7 @@ async function benchmarkDownload(key: string, version: string): Promise<Benchmar
 }
 
 function printResults(results: BenchmarkResult[]) {
-  console.log('\n' + '='.repeat(60))
+  console.log(`\n${'='.repeat(60)}`)
   console.log('BENCHMARK RESULTS')
   console.log('='.repeat(60))
 
@@ -177,7 +197,7 @@ function printResults(results: BenchmarkResult[]) {
     console.log(`  Throughput: ${r.throughputMBps.toFixed(2)} MB/s`)
   }
 
-  console.log('\n' + '='.repeat(60))
+  console.log(`\n${'='.repeat(60)}`)
 }
 
 async function main() {
@@ -189,20 +209,20 @@ async function main() {
   const key = `benchmark-${Date.now()}`
   const version = randomBytes(16).toString('hex')
 
-  const results: BenchmarkResult[] = []
-
   try {
-    // Benchmark upload
-    results.push(await benchmarkUpload(key, version))
+    // Benchmark upload and download
+    const uploadResult = await benchmarkUpload(key, version)
+    const downloadResult = await benchmarkDownload(key, version)
 
-    // Benchmark download
-    results.push(await benchmarkDownload(key, version))
-
-    printResults(results)
+    printResults([uploadResult, downloadResult])
   } catch (err) {
     console.error('\nBenchmark failed:', err)
-    process.exit(1)
+    throw err
   }
 }
 
-main()
+// eslint-disable-next-line unicorn/prefer-top-level-await
+main().catch(() => {
+  // eslint-disable-next-line unicorn/no-process-exit
+  process.exit(1)
+})
