@@ -26,21 +26,26 @@ volumes:
 
 ## Benchmarking
 
-Test upload/download performance:
+Test upload/download performance with statistical analysis:
 
 ```bash
 # Start the server
 pnpm dev
 
-# In another terminal, run benchmark
+# In another terminal, run benchmark (default: 10 iterations)
 pnpm benchmark
 
-# Custom cache size and chunk size
-CACHE_SIZE_MB=500 CHUNK_SIZE_MB=64 pnpm benchmark
+# Quick test with single iteration
+ITERATIONS=1 pnpm benchmark
+
+# Custom parameters
+CACHE_SIZE_MB=500 CHUNK_SIZE_MB=64 ITERATIONS=20 pnpm benchmark
 
 # Test against remote server
 API_BASE_URL=https://your-server.com pnpm benchmark
 ```
+
+The benchmark runs multiple iterations (default: 10) and reports statistical metrics including mean, median, standard deviation, min, and max throughput.
 
 ## Documentation
 
