@@ -6,7 +6,6 @@ import { pipeline } from 'node:stream/promises'
 
 import { z } from 'zod'
 import { BASE_FOLDER, parseEnv, UPLOAD_FOLDER } from '~/lib/storage/storage-driver'
-import { createTempDir } from '~/lib/utils'
 
 export const FilesystemStorageDriver = {
   async create() {
@@ -35,27 +34,27 @@ export const FilesystemStorageDriver = {
       },
 
       async completeMultipartUpload(opts) {
-        const tempDir = await createTempDir()
-        const outputTempFilePath = path.join(tempDir, 'output')
+        const outputPath = path.join(rootFolder, BASE_FOLDER, opts.cacheFileName)
+        const writeStream = createWriteStream(outputPath)
 
         for (const partNumber of opts.partNumbers) {
-          const buffer = await fs.readFile(
-            path.join(rootFolder, BASE_FOLDER, UPLOAD_FOLDER, opts.uploadId, `part_${partNumber}`),
+          const partPath = path.join(
+            rootFolder,
+            BASE_FOLDER,
+            UPLOAD_FOLDER,
+            opts.uploadId,
+            `part_${partNumber}`,
           )
-
-          await fs.appendFile(outputTempFilePath, buffer)
+          await pipeline(createReadStream(partPath), writeStream, { end: false })
         }
 
-        await fs.copyFile(
-          outputTempFilePath,
-          path.join(rootFolder, BASE_FOLDER, opts.cacheFileName),
-        )
-        await fs.rm(outputTempFilePath)
+        writeStream.end()
+        await new Promise<void>((resolve, reject) => {
+          writeStream.on('finish', resolve)
+          writeStream.on('error', reject)
+        })
 
-        await Promise.all([
-          this.cleanupMultipartUpload(opts.uploadId),
-          fs.rm(outputTempFilePath, { force: true }),
-        ])
+        await this.cleanupMultipartUpload(opts.uploadId)
       },
 
       async cleanupMultipartUpload(uploadId) {
