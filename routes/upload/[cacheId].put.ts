@@ -53,12 +53,17 @@ export default defineEventHandler(async (event) => {
   const start = chunkIndex * chunkSize
 
   const adapter = await useStorageAdapter()
-  await adapter.uploadChunk({
-    uploadId: cacheId,
-    chunkStream: stream as ReadableStream<Buffer>,
-    chunkStart: start,
-    chunkIndex,
-  })
+  try {
+    await adapter.uploadChunk({
+      uploadId: cacheId,
+      chunkStream: stream as ReadableStream<Buffer>,
+      chunkStart: start,
+      chunkIndex,
+    })
+  } catch (err) {
+    logger.error('Upload chunk failed:', err)
+    throw err
+  }
 
   // prevent random EOF error with in tonistiigi/go-actions-cache caused by missing request id
   setHeader(event, 'x-ms-request-id', randomUUID())

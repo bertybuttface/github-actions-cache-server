@@ -106,31 +106,29 @@ export const S3StorageDriver = {
           throw new Error('S3 driver requires cacheFileName for uploadPart')
         }
 
-        // Convert ReadableStream to Buffer
-        const reader = opts.data.getReader()
-        const chunks: Uint8Array[] = []
-        let totalLength = 0
+        try {
+          // Upload directly without buffering - S3 accepts ReadableStream
+          const result = await s3.send(
+            new UploadPartCommand({
+              Bucket: options.STORAGE_S3_BUCKET,
+              Key: `${BASE_FOLDER}/${opts.cacheFileName}`,
+              UploadId: opts.driverUploadId,
+              PartNumber: opts.partNumber,
+              Body: opts.data as any,
+            }),
+          )
 
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          chunks.push(value)
-          totalLength += value.length
+          return result.ETag || null
+        } catch (err) {
+          console.error('S3 uploadPart failed:', {
+            bucket: options.STORAGE_S3_BUCKET,
+            key: `${BASE_FOLDER}/${opts.cacheFileName}`,
+            uploadId: opts.driverUploadId,
+            partNumber: opts.partNumber,
+            error: err,
+          })
+          throw err
         }
-
-        const buffer = Buffer.concat(chunks, totalLength)
-
-        const result = await s3.send(
-          new UploadPartCommand({
-            Bucket: options.STORAGE_S3_BUCKET,
-            Key: `${BASE_FOLDER}/${opts.cacheFileName}`,
-            UploadId: opts.driverUploadId,
-            PartNumber: opts.partNumber,
-            Body: buffer,
-          }),
-        )
-
-        return result.ETag || null
       },
 
       async completeMultipartUpload(opts) {
