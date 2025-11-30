@@ -89,6 +89,8 @@ export const useStorageAdapter = createSingletonPromise(async () => {
         chunkStart: number
         chunkIndex: number
       }) {
+        logger.debug('Upload: Starting chunk upload', { uploadId, chunkIndex, chunkStart })
+
         const upload = await db
           .selectFrom('uploads')
           .selectAll()
@@ -104,6 +106,15 @@ export const useStorageAdapter = createSingletonPromise(async () => {
         const partNumber = chunkIndex + 1
         const cacheFileName = getCacheFileName(upload.key, upload.version)
 
+        logger.debug('Upload: Found upload record', {
+          uploadId,
+          key: upload.key,
+          version: upload.version,
+          partNumber,
+          cacheFileName,
+          driverUploadId: upload.driver_upload_id,
+        })
+
         try {
           const eTag = await driver.uploadPart({
             uploadId: upload.id,
@@ -112,6 +123,12 @@ export const useStorageAdapter = createSingletonPromise(async () => {
             driverUploadId: upload.driver_upload_id,
             cacheFileName,
           })
+          logger.debug('Upload: Driver uploadPart completed', {
+            uploadId,
+            partNumber,
+            eTag,
+          })
+
           await db
             .insertInto('upload_parts')
             .values({
@@ -120,22 +137,26 @@ export const useStorageAdapter = createSingletonPromise(async () => {
               e_tag: eTag,
             })
             .execute()
+
+          logger.info('Upload: Chunk uploaded successfully', {
+            uploadId,
+            chunkStart,
+            partNumber,
+            eTag,
+          })
         } catch (err) {
-          logger.debug(
-            'Upload: Error',
-            {
-              uploadId,
-              chunkStart,
-              partNumber,
-            },
-            err,
-          )
+          logger.error('Upload: Error', {
+            uploadId,
+            chunkStart,
+            partNumber,
+            error: err,
+          })
           throw err
         }
-
-        logger.debug('Upload:', { uploadId, chunkStart, partNumber })
       },
       async commitCache(uploadId: number | string) {
+        logger.info('Commit: Starting', { uploadId })
+
         const upload = await db
           .selectFrom('uploads')
           .selectAll()
@@ -143,9 +164,16 @@ export const useStorageAdapter = createSingletonPromise(async () => {
           .executeTakeFirst()
 
         if (!upload) {
-          logger.debug('Commit: Upload not found. Ignoring...')
+          logger.debug('Commit: Upload not found. Ignoring...', { uploadId })
           return
         }
+
+        logger.debug('Commit: Found upload', {
+          uploadId,
+          key: upload.key,
+          version: upload.version,
+          driverUploadId: upload.driver_upload_id,
+        })
 
         const parts = await db
           .selectFrom('upload_parts')
@@ -154,13 +182,26 @@ export const useStorageAdapter = createSingletonPromise(async () => {
           .orderBy('part_number', 'asc')
           .execute()
 
+        logger.info('Commit: Found parts', {
+          uploadId,
+          partCount: parts.length,
+          partNumbers: parts.map((p) => p.part_number),
+          hasETags: parts.filter((p) => p.e_tag !== null).length,
+        })
+
         await db.transaction().execute(async (tx) => {
-          logger.debug('Commit:', uploadId)
+          logger.debug('Commit: Starting transaction', { uploadId })
 
           await tx.deleteFrom('uploads').where('id', '=', upload.id).execute()
           await updateOrCreateKey(tx, {
             key: upload.key,
             version: upload.version,
+          })
+
+          logger.debug('Commit: Calling driver.completeMultipartUpload', {
+            uploadId,
+            cacheFileName: getCacheFileName(upload.key, upload.version),
+            partCount: parts.length,
           })
 
           await driver.completeMultipartUpload({
@@ -174,6 +215,12 @@ export const useStorageAdapter = createSingletonPromise(async () => {
                 partNumber: part.part_number,
                 eTag: part.e_tag as string,
               })),
+          })
+
+          logger.info('Commit: Successfully completed', {
+            uploadId,
+            key: upload.key,
+            version: upload.version,
           })
         })
       },

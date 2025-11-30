@@ -17,16 +17,34 @@ export default defineEventHandler(async (event) => {
 
   const { key, version } = parsedBody.data
 
+  console.log('FinalizeCacheEntryUpload: Request received', { key, version })
+
   const db = await useDB()
   const adapter = await useStorageAdapter()
   const upload = await getUpload(db, { key, version })
-  if (!upload)
+
+  if (!upload) {
+    console.log('FinalizeCacheEntryUpload: Upload not found', { key, version })
     throw createError({
       statusCode: 404,
       statusMessage: 'Upload not found',
     })
+  }
 
-  await adapter.commitCache(upload.id)
+  console.log('FinalizeCacheEntryUpload: Committing cache', { key, version, uploadId: upload.id })
+
+  try {
+    await adapter.commitCache(upload.id)
+    console.log('FinalizeCacheEntryUpload: Success', { key, version, entryId: upload.id })
+  } catch (err) {
+    console.error('FinalizeCacheEntryUpload: Commit failed', {
+      key,
+      version,
+      uploadId: upload.id,
+      error: err,
+    })
+    throw err
+  }
 
   return {
     ok: true,

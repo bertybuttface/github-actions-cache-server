@@ -20,13 +20,24 @@ export default defineEventHandler(async (event) => {
 
   const adapter = await useStorageAdapter()
   const reservation = await adapter.reserveCache({ key, version })
-  if (!reservation.cacheId)
+  if (!reservation.cacheId) {
+    console.log('CreateCacheEntry: Cache already exists or reservation failed', { key, version })
     return {
       ok: false,
     }
+  }
 
-  return {
+  const response = {
     ok: true,
     signed_upload_url: `${ENV.API_BASE_URL}/upload/${reservation.cacheId}`,
   }
+
+  console.log('CreateCacheEntry: Success', {
+    key,
+    version,
+    cacheId: reservation.cacheId,
+    signed_upload_url: response.signed_upload_url,
+  })
+
+  return response
 })

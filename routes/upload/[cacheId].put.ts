@@ -21,23 +21,38 @@ export default defineEventHandler(async (event) => {
       statusMessage: `Invalid path parameters: ${parsedPathParams.error.message}`,
     })
 
-  if (getQuery(event).comp === 'blocklist') {
+  const { cacheId } = parsedPathParams.data
+  const query = getQuery(event)
+
+  logger.debug('Upload request:', {
+    cacheId,
+    query,
+    method: event.method,
+    userAgent: getHeader(event, 'user-agent'),
+  })
+
+  if (query.comp === 'blocklist') {
+    // Azure Blob Storage Put Block List acknowledgment
+    // Note: This does NOT commit the cache - FinalizeCacheEntryUpload does that
+    logger.debug(`Blocklist acknowledgment for cache ${cacheId}`)
     setResponseStatus(event, 201)
     // prevent random EOF error with in tonistiigi/go-actions-cache caused by missing request id
     setHeader(event, 'x-ms-request-id', randomUUID())
     return
   }
 
-  const blockId = getQuery(event)?.blockid as string
+  const blockId = query.blockid as string
   // if no block id, upload smaller than chunk size
   const chunkIndex = blockId ? getChunkIndexFromBlockId(blockId) : 0
-  if (chunkIndex === undefined)
+  if (chunkIndex === undefined) {
+    logger.error('Invalid block id:', { blockId })
     throw createError({
       statusCode: 400,
       statusMessage: `Invalid block id: ${blockId}`,
     })
+  }
 
-  const { cacheId } = parsedPathParams.data
+  logger.debug('Uploading block:', { cacheId, blockId, chunkIndex })
 
   const stream = getRequestWebStream(event)
   if (!stream) {
@@ -52,6 +67,15 @@ export default defineEventHandler(async (event) => {
   const chunkSize = userAgent && userAgent.startsWith('azsdk-go-azblob') ? MB : 64 * MB
   const start = chunkIndex * chunkSize
 
+  logger.debug('Upload chunk details:', {
+    cacheId,
+    chunkIndex,
+    chunkStart: start,
+    chunkSize,
+    isAzureSdk: userAgent?.startsWith('azsdk-go-azblob'),
+    userAgent,
+  })
+
   const adapter = await useStorageAdapter()
   try {
     await adapter.uploadChunk({
@@ -60,8 +84,9 @@ export default defineEventHandler(async (event) => {
       chunkStart: start,
       chunkIndex,
     })
+    logger.info(`Chunk ${chunkIndex} uploaded successfully for cache ${cacheId}`)
   } catch (err) {
-    logger.error('Upload chunk failed:', err)
+    logger.error('Upload chunk failed:', { cacheId, chunkIndex, error: err })
     throw err
   }
 

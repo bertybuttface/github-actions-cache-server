@@ -1,6 +1,6 @@
 {
   "permissions": {
-    "allow": ["Bash(git add:*)"],
+    "allow": ["Bash(git add:*)", "WebFetch(domain:github.com)", "WebSearch"],
     "deny": [],
     "ask": []
   }
