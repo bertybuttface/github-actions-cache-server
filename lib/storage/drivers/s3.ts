@@ -1,5 +1,6 @@
 import type { StorageDriver } from '~/lib/storage/storage-driver'
 
+import { Readable } from 'node:stream'
 import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
@@ -27,6 +28,9 @@ export const S3StorageDriver = {
     const s3 = new S3Client({
       forcePathStyle: true,
       region: options.AWS_REGION,
+      // Disable automatic checksum calculation for streaming uploads
+      // ETags provide integrity checking for multipart uploads
+      requestChecksumCalculation: 'WHEN_REQUIRED',
     })
 
     try {
@@ -107,14 +111,17 @@ export const S3StorageDriver = {
         }
 
         try {
-          // Upload directly without buffering - S3 accepts ReadableStream
+          // Convert Web ReadableStream to Node.js Readable to avoid
+          // "Unable to calculate hash for flowing readable stream" errors
+          const nodeStream = Readable.fromWeb(opts.data as any)
+
           const result = await s3.send(
             new UploadPartCommand({
               Bucket: options.STORAGE_S3_BUCKET,
               Key: `${BASE_FOLDER}/${opts.cacheFileName}`,
               UploadId: opts.driverUploadId,
               PartNumber: opts.partNumber,
-              Body: opts.data as any,
+              Body: nodeStream,
             }),
           )
 
