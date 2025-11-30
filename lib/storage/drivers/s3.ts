@@ -122,6 +122,8 @@ export const S3StorageDriver = {
               UploadId: opts.driverUploadId,
               PartNumber: opts.partNumber,
               Body: nodeStream,
+              // S3 requires Content-Length for multipart uploads
+              ContentLength: opts.contentLength,
             }),
           )
 
@@ -132,6 +134,7 @@ export const S3StorageDriver = {
             key: `${BASE_FOLDER}/${opts.cacheFileName}`,
             uploadId: opts.driverUploadId,
             partNumber: opts.partNumber,
+            contentLength: opts.contentLength,
             error: err,
           })
           throw err

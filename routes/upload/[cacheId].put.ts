@@ -61,6 +61,8 @@ export default defineEventHandler(async (event) => {
   }
 
   const userAgent = getHeader(event, 'user-agent')
+  const contentLengthHeader = getHeader(event, 'content-length')
+  const contentLength = contentLengthHeader ? Number.parseInt(contentLengthHeader, 10) : undefined
 
   // 1 MB for docker buildx
   // 64 MB for everything else
@@ -72,6 +74,7 @@ export default defineEventHandler(async (event) => {
     chunkIndex,
     chunkStart: start,
     chunkSize,
+    contentLength,
     isAzureSdk: userAgent?.startsWith('azsdk-go-azblob'),
     userAgent,
   })
@@ -83,6 +86,7 @@ export default defineEventHandler(async (event) => {
       chunkStream: stream as ReadableStream<Buffer>,
       chunkStart: start,
       chunkIndex,
+      contentLength,
     })
     logger.info(`Chunk ${chunkIndex} uploaded successfully for cache ${cacheId}`)
   } catch (err) {

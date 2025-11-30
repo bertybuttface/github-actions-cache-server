@@ -21,6 +21,7 @@ export interface StorageDriver {
     data: ReadableStream
     driverUploadId?: string | null
     cacheFileName?: CacheFileName
+    contentLength?: number
   }) => Promise<string | null>
   completeMultipartUpload: (opts: {
     cacheFileName: CacheFileName

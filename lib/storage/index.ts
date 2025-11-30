@@ -83,13 +83,20 @@ export const useStorageAdapter = createSingletonPromise(async () => {
         chunkStream,
         chunkStart,
         chunkIndex,
+        contentLength,
       }: {
         uploadId: number
         chunkStream: ReadableStream<Buffer>
         chunkStart: number
         chunkIndex: number
+        contentLength?: number
       }) {
-        logger.debug('Upload: Starting chunk upload', { uploadId, chunkIndex, chunkStart })
+        logger.debug('Upload: Starting chunk upload', {
+          uploadId,
+          chunkIndex,
+          chunkStart,
+          contentLength,
+        })
 
         const upload = await db
           .selectFrom('uploads')
@@ -122,11 +129,13 @@ export const useStorageAdapter = createSingletonPromise(async () => {
             data: chunkStream,
             driverUploadId: upload.driver_upload_id,
             cacheFileName,
+            contentLength,
           })
           logger.debug('Upload: Driver uploadPart completed', {
             uploadId,
             partNumber,
             eTag,
+            contentLength,
           })
 
           await db
